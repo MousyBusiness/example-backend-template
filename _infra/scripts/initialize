@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+DIR=$(dirname "$0")
+
+[[ -z "$1" ]] && echo "provide stage arg e.g. dev, prod" && exit 1
+
+STAGE=$1
+[[ "$STAGE" != "dev" ]] && [[ "$STAGE" != "prod" ]] && echo "invalid stage arg, options: dev, prod" && exit 1
+CONFIG_DIR=$DIR/../config
+CONFIG_FILENAME="project.config"
+CONFIG_FILE="$CONFIG_DIR/$CONFIG_FILENAME"
+GSCRIPTS="$DIR/gcp"
+
+# check project configuration file exists
+! [[ -f "$CONFIG_FILE" ]] && echo "error: project configuration file missing" && exit 1
+
+# import common project configurations (exporting with set -a)
+set -a
+. "$CONFIG_FILE"
+PROJECT_ID="$ROOT_PROJECT_ID-$STAGE"
+set +a
+
+# verify configuration
+[[ -z "$PROJECT_ID" ]] && echo "error: require project id in project configuration" && exit 1
+ACITIVE_PROJECT=$(gcloud config get-value project 2>/dev/null)
+[[ -z "$ACITIVE_PROJECT" ]] && echo "error: gcloud project not correctly configured" && exit 1
+
+set -e
+
+echo "creating project and configuring billing..."
+$GSCRIPTS/setup-project "$PROJECT_ID"
+
+[[ "$ACITIVE_PROJECT" != "$PROJECT_ID" ]] && echo "error: project ID doesnt match current gcloud project, please configure using 'gcloud config set project ...'" && exit 1
+
+echo "enabling services..."
+$GSCRIPTS/enable-services "$PROJECT_ID"
+
+echo "create keys..."
+$GSCRIPTS/create-api-key --project "$PROJECT_ID" "org-api-key"
+$GSCRIPTS/create-api-key --project "$PROJECT_ID" "org-auth-encrypt-secret"
+$GSCRIPTS/create-api-key --project "$PROJECT_ID" "push-api-key"
+$GSCRIPTS/create-api-key --project "$PROJECT_ID" "relay-api-key"
+$GSCRIPTS/create-api-key --project "$PROJECT_ID" "signal-api-key"
+$GSCRIPTS/create-api-key --project "$PROJECT_ID" "user-api-key"
+$GSCRIPTS/create-api-key --project "$PROJECT_ID" "turn-static-auth-secret"

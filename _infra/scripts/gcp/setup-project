@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+PROJECT_NAME=$1
+
+[[ -z "$PROJECT_NAME" ]] && echo "error: require new project name" && exit 1
+
+# create project if doesnt exit
+if ! gcloud projects list | awk '{ print $2 }' | grep -Eq "^${PROJECT_NAME}$"; then
+  echo "creating project $PROJECT_NAME"
+  gcloud projects create $PROJECT_NAME
+fi
+
+# get project index by matching name column
+PROJECT_INDEX=$(gcloud projects list | awk '{ print $2 }' | grep -n $PROJECT_NAME | sed 's/:.*//')
+
+# get project id using index
+PROJECT_LINE=$(gcloud projects list | head -n "$PROJECT_INDEX" | tail -n 1)
+
+# double check
+if ! echo "$PROJECT_LINE" | awk '{ print $2 }' | grep -Eq "^${PROJECT_NAME}$"; then
+  echo "error: project name didn't match during double check" && exit 1
+fi
+
+# extract id and number
+PROJECT_ID=$(echo "$PROJECT_LINE" | awk '{ print $1 }')
+echo "PROJECT_ID=$PROJECT_ID"
+PROJECT_NUMBER=$(echo "$PROJECT_LINE" | awk '{ print $3 }')
+echo "PROJECT_NUMBER=$PROJECT_NUMBER"
+
+# get billing
+BILLING_LIST=$(gcloud beta billing accounts list | grep -v ACCOUNT_ID)
+
+# ensure only 1 billing account exists
+LINES=$(echo "$BILLING_LIST" | wc -l | tr -d ' ')
+if [[ "$LINES" != "1" ]]; then
+  echo "error: too many billing accounts" && exit 1
+fi
+
+# extract billing account id
+BILLING_ACCOUNT=$(echo "$BILLING_LIST" | awk '{ print $1 }')
+echo "BILLING_ACCOUNT=$BILLING_ACCOUNT"
+
+# check if billing is enabled
+BILLING_PROJECTS_LIST=$(gcloud beta billing projects list --billing-account=$BILLING_ACCOUNT)
+if ! echo "$BILLING_PROJECTS_LIST" | awk '{ print $1 }' | grep -Eq "^${PROJECT_ID}$"; then
+  echo "billing isn't linked, enabling..."
+  # enable billing
+  gcloud beta billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT"
+else
+  echo "billing is linked"
+  # check enabled
+  ENABLED=$(echo "$BILLING_PROJECTS_LIST" | grep "$PROJECT_ID" | awk '{ print $3 }')
+  if [[ "$ENABLED" != "True" ]]; then
+    echo "project is linked but not enabled, enabling..."
+    # enable billing
+    gcloud beta billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT"
+  fi
+fi
+

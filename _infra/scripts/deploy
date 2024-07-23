@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+set -e
+
+DIR=$(dirname $0)
+ROOT="$DIR/.."
+STAGE=dev
+
+while [[ -n $1 ]]; do
+  case $1 in
+  --stage)
+    STAGE=$2
+    shift
+    ;;
+  --force)
+    FORCE="true"
+    ;;
+  *)
+    echo "unexpected arg" && exit 1
+    ;;
+  esac
+  shift
+done
+
+# load project configurations
+. $DIR/../../config/project.config
+PROJECT_ID="$ROOT_PROJECT_ID-$STAGE"
+
+# only run if gcloud is currently set to the correct project id
+[[ $(gcloud config get-value project) != "$PROJECT_ID" ]] && echo "warning: gcloud is not currently configured to $PROJECT_ID" && exit 1
+
+cd "$ROOT/terraform/envs/$STAGE"
+
+terraform init
+terraform get
+cmd="terraform apply"
+# shellcheck disable=SC2235
+([[ "$STAGE" == "dev" ]] || [[ "$FORCE" == "true" ]]) && cmd="$cmd -auto-approve"
+eval "$cmd"
+
+echo "done"

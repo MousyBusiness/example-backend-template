@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+PROJECT_ID=$1
+
+[[ -z "$PROJECT_ID" ]] && echo "error: require PROJECT_ID" && exit 1
+[[ -z "$SERVICES" ]] && echo "error: require SERVICES" && exit 1
+
+if ! gcloud projects list | awk '{ print $1 }' | grep -Eq "^${PROJECT_ID}$"; then
+  echo "error: invalid project id" && exit 1
+fi
+
+echo "enabling services for $PROJECT_ID"
+gcloud services --project $PROJECT_ID enable $(echo "$SERVICES" | awk '{ print $1 }') --async
