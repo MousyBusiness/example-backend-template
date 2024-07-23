@@ -1,0 +1,1 @@
+golangci-lint run --disable typecheck --exclude SA1029

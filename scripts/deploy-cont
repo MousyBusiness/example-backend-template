@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+DIR=$(dirname $0)
+STAGE=dev
+USER=$(cat "$DIR/../.gitaccess" | grep 'USER=' | sed 's/USER=//')
+KEY=$(cat "$DIR/../.gitaccess" | grep 'KEY=' | sed 's/KEY=//')
+TAG_VERSION="latest"
+REGIONS=("europe-west2" "australia-southeast1")
+
+while [[ -n "$1" ]]; do
+  case $1 in
+  --build-only)
+    echo "build only"
+    BUILD_ONLY="true"
+    ;;
+  --build-and-push)
+    echo "build and push"
+    BUILD_AND_PUSH="true"
+    ;;
+  --tag)
+    TAG_VERSION="$2"
+    echo "using tag: $TAG_VERSION, final image tag: eu.gcr.io/\$PROJECT_ID/\$SERVICE:${TAG_VERSION}"
+    shift
+    ;;
+  --stage)
+    STAGE=$2
+    shift
+    ;;
+  *)
+    # flags must come before service
+    break
+    ;;
+  esac
+  shift
+done
+
+[[ -n $TAG_VERSION ]] && [[ $TAG_VERSION != "latest" ]] && [[ -z $BUILD_AND_PUSH ]] && [[ -z $BUILD_ONLY ]] && echo "error: dangerous operation, cannot override tag with a deploy - use only for e2e local testing" && exit 1
+
+# load project configurations
+. "$DIR/../config/project.config"
+PROJECT_ID="$ROOT_PROJECT_ID-$STAGE"
+
+[[ -z "$1" ]] && echo "error: require service name" && exit 1
+
+# only run if gcloud is currently set to the correct project id
+[[ $(gcloud config get-value project) != "$PROJECT_ID" ]] && echo "warning: gcloud is not currently configured to $PROJECT_ID" && exit 1
+
+build() {
+  SERVICE=$1
+  TAG="eu.gcr.io/$PROJECT_ID/${SERVICE}:${TAG_VERSION}"
+  echo "building container with tag: $TAG"
+  docker build -q --platform=linux/amd64 --build-arg STAGE=$STAGE --build-arg SERVICE=$SERVICE --build-arg ACCESS_TOKEN_USR="$USER" --build-arg ACCESS_TOKEN_PWD="$KEY" -t "$TAG" "$DIR/../"
+}
+
+buildAndPush() {
+  SERVICE=$1
+  build $SERVICE
+  [[ "$BUILD_ONLY" == "true" ]] && return # exit early if only want build
+
+  echo "pushing $TAG to container registry"
+  docker push "$TAG"
+
+  [[ "$BUILD_AND_PUSH" == "true" ]] && echo "skipping $SERVICE deploy" && return
+
+  echo "deploying $SERVICE"
+
+  echo "deploying to cloud run"
+
+  for region in "${REGIONS[@]}"; do
+    echo "deploying region: $region"
+    gcloud run deploy "${SERVICE}-${region}" --region "$region" --image "eu.gcr.io/$PROJECT_ID/$SERVICE"
+  done
+}
+
+set -e
+
+case $1 in
+example)
+  echo "deploying example"
+  buildAndPush $1
+  ;;
+all)
+  echo "deploying all services"
+  buildAndPush example &
+  pids[0]=$!
+
+  # wait for all pids
+  for pid in ${pids[*]}; do
+    wait $pid
+  done
+
+  echo "done"
+  ;;
+*)
+  echo "unknown arg"
+  exit 1
+  ;;
+esac

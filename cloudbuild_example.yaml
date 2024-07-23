@@ -1,0 +1,35 @@
+timeout: '3600s'
+availableSecrets:
+  secretManager:
+    - versionName: 'projects/$PROJECT_ID/secrets/github-ci-token/versions/1'
+      env: 'GITHUB_TOKEN'
+steps:
+  # Get firebase service account from Secret Manager
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args: [ '-c', 'gcloud secrets versions access 1 --secret="firebase-admin-sa" > /workspace/${PROJECT_ID}-firebase-admin-sa.json' ]
+
+  # Build example service
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args: [ '-c', 'docker build -t eu.gcr.io/$PROJECT_ID/example:$COMMIT_SHA  -t eu.gcr.io/$PROJECT_ID/example:latest --build-arg SERVICE=example --build-arg STAGE=dev --build-arg ACCESS_TOKEN_USR=ExampleGitHubUserCI --build-arg ACCESS_TOKEN_PWD=$$GITHUB_TOKEN .' ]
+    secretEnv: [ 'GITHUB_TOKEN' ]
+
+  # Push $COMMIT_SHA tags to gcr
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [ 'push', 'eu.gcr.io/$PROJECT_ID/example:$COMMIT_SHA' ]
+
+  # Push latest tags to gcr
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [ 'push', 'eu.gcr.io/$PROJECT_ID/example:latest' ]
+
+
+  # Refresh cloud run containers
+  # example - europe-west2
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args: [ '-c', 'gcloud run deploy example-europe-west2 --region europe-west2 --image eu.gcr.io/$PROJECT_ID/example:latest' ]
+  # example - australia-southeast1
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args: [ '-c', 'gcloud run deploy example-australia-southeast1 --region australia-southeast1 --image eu.gcr.io/$PROJECT_ID/example:latest' ]
